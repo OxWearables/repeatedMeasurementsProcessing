@@ -1,0 +1,118 @@
+---
+title: "Season Repeats Data Preparation"
+author: "R-Walmsley"
+date: "2023-01-11"
+output: 
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+```{r}
+library(data.table)
+```
+
+This chunk is just to get a set of columns of relevance: 
+```{r, include = FALSE}
+d <- data.frame(fread(paste0("data/59070/summary_files_oct21/oct21_repeat0_five_sec_basic_summary.csv")))
+red <- colnames(d)
+for (day in c("mon", "tue", "wed", "thur", "fri", "sat", "sun")){
+  red <- red[!(grepl(day,red))]
+}
+red <- red[!(grepl("hour|hrs|MET|calibration|CutPoint|eid",red))]
+red <- c(red, "extremeAcc", "tooManyClips", "excluded")
+print(red)
+rm(d)
+```
+
+## Load data and perform exclusions
+```{r}
+# Note preprepared list of column names for inclusion in the final data
+print(red)
+
+# Load and prpeare datasets
+for (i in 0:4){
+  
+  # Load data
+  d <- data.frame(fread(paste0("data/59070/summary_files_oct21/oct21_repeat", i, "_five_sec_basic_summary.csv")))
+
+  # Set up data frame to record exclusions
+  exclusions <- data.frame(matrix(nrow = 0, ncol = 2))
+  colnames(exclusions) <- c("Category", "n")
+  
+  # Overall numbers
+  exclusions <- rbind(exclusions, data.frame("Category" = "Total_participants", "n" = nrow(d)))
+  
+  # Calibration 
+  exclusions <- rbind(exclusions, data.frame("Category" = "Not_calibrated", "n" = sum(d$quality.goodCalibration == 0)))
+  
+  # Wear time 
+  exclusions <- rbind(exclusions, data.frame("Category" = "Insufficient_wear_time", "n" = sum(d$quality.goodWearTime == 0)))
+  
+  # Extreme acc values
+  d$extremeAcc <- (d$acc.overall.avg > 100)
+  exclusions <- rbind(exclusions, data.frame("Category" = "Extreme_acc_values", "n" = sum(d$extremeAcc)))
+  
+  # Clips before or after calibration
+  d$tooManyClips <- (d$clipsAfterCalibration > 0.01*d$totalReads)|(d$clipsBeforeCalibration > 0.01*d$totalReads)
+  exclusions <- rbind(exclusions, data.frame("Category" = "Too_many_clips", "n" = sum(d$tooManyClips)))
+    
+  # Excluded in (any Category)
+  d$excluded <- (!(d$quality.goodCalibration))|(!(d$quality.goodWearTime))|(d$extremeAcc)|(d$tooManyClips)
+  exclusions <- rbind(exclusions, data.frame("Category" = "Excluded_for_any_reason", "n" = sum(d$excluded))) # Note the individual categories for exclusion are not mutually exclusive
+  
+  # Rename columns
+  colnames(d) <- paste0(colnames(d), "_s", i)
+  d$eid <- gsub(paste0("_90001_", i, "_0.gz"), "", d[, paste0("eid_s", i)])
+  
+  # Keep only a subset of columns 
+  d <- d[, c("eid", paste0(red, "_s", i))]
+  
+  # Store dataset at this point 
+  assign(paste0("d", i), d)
+ 
+  # Write table describing 
+  names(exclusions)[names(exclusions) == 'n'] <- paste0("n_s", i)
+  assign(paste0("exclusions", i), exclusions)
+}
+```
+
+Table describing exclusions at each repeat:
+
+```{r}
+# Collate table describing exclusions
+exclusions <- exclusions0
+ for (i in 0:4){
+   exclusions <- merge(exclusions, get(paste0("exclusions", i)), by = "Category", sort = FALSE)
+ }
+
+exclusions
+```
+
+## Join files
+```{r}
+# Join files
+dAll <- d0
+for (i in 1:4){
+  dAll <- merge(dAll, get(paste0("d", i)), by = "eid", all = TRUE)
+}
+# Add indicator of data and of high quality data at all repeats
+dAll$data_for_all_repeats <- !(is.na(dAll$excluded_s0) | is.na(dAll$excluded_s1) |is.na(dAll$excluded_s2)| is.na(dAll$excluded_s3)| is.na(dAll$excluded_s4))
+dAll$quality_data_for_all_repeats <- (dAll$data_for_all_repeats) & !(dAll$excluded_s0 | dAll$excluded_s1 | dAll$excluded_s2 | dAll$excluded_s3 | dAll$excluded_s4)
+```
+
+## Summarise data
+There are:
+
+- `r nrow(dAll)` participants in at least one repeat
+- `r sum(dAll$data_for_all_repeats, na.rm = TRUE)` participants with data for all repeats (including baseline)
+- `r sum(dAll$quality_data_for_all_repeats, na.rm = TRUE)` participants with high-quality data for all repeats (including baseline)
+
+## Write file
+```{r}
+write.csv(dAll, "data/59070/summary_data_all_with_5sec_epoch_and_ml_jan23.csv")
+```
