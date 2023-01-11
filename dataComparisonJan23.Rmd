@@ -1,0 +1,59 @@
+---
+title: "Season Repeats Data Preparation"
+author: "R-Walmsley"
+date: "2023-01-11"
+output: 
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+```{r}
+library(data.table)
+```
+
+## Load data 
+```{r}
+dat <- fread("data/59070/summary_data_all_with_5sec_epoch_and_ml_jan23.csv", data.table = FALSE)
+dat_showcase <- fread("data/59070/showcase_version_of_data.csv", data.table = FALSE)
+```
+
+
+## Compare with downloaded data for s0
+
+```{r}
+dat_s0 <- dat[, c("eid", colnames(dat)[grepl("_s0", colnames(dat))])]
+dat_showcase <- dat_showcase[, c("eid", "overall_activity", colnames(dat_showcase)[grepl("Fraction acceleration", colnames(dat_showcase))])]
+```
+
+
+## Align names 
+```{r}
+col_compare <-
+  list(
+    "acc.overall.avg_s0" = "overall_activity",
+    "acc.ecdf.100.0mg_s0" = "Fraction acceleration <= 100 milli-gravities" ,
+    "acc.ecdf.425.0mg_s0" =  "Fraction acceleration <= 425 milli-gravities"
+  )
+
+```
+
+## Merge datasets and compare the values of interest across the datasets
+```{r}
+dat_merge <- merge(dat_s0, dat_showcase, by = "eid")
+
+for (col in names(col_compare)){
+  print(col)
+  col_showcase <- col_compare[[col]]
+  print(cor(dat_merge[, col_showcase], dat_merge[, col]))
+  diff <- dat_merge[, col_showcase] - dat_merge[, col]
+  print(quantile(diff, seq(0, 1, by = 0.05)))
+  print(quantile(abs(diff), seq(0, 1, by = 0.05)))
+  hist(diff, breaks = 100)
+}
+```
+
